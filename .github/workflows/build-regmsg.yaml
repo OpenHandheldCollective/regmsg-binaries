@@ -369,6 +369,7 @@ jobs:
       - name: Prune old releases
         if: ${{ steps.rel.outputs.regmsgversion != '' }}
         env:
+          JUST_RELEASED: ${{ steps.rel.outputs.regmsgversion }}
           GH_TOKEN: ${{ secrets.REG_TOKEN }}
         run: |
           set -euo pipefail
@@ -380,10 +381,12 @@ jobs:
           prune() {
             pattern="$1"
             echo "== keeping the ${KEEP} newest releases matching ${pattern}"
+            # publishedAt, not createdAt: createdAt is the tagged commit's date, which
+            # every release here shares, so sorting on it kept the oldest.
             # Newest first, restrict to this family, then drop the first KEEP.
             # grep is allowed to match nothing, hence the || true.
-            doomed="$(gh release list --limit 200 -R REG-Linux/regmsg-binaries --json tagName,createdAt \
-                        --jq 'sort_by(.createdAt) | reverse | .[].tagName' \
+            doomed="$(gh release list --limit 200 -R REG-Linux/regmsg-binaries --json tagName,publishedAt \
+                        --jq 'sort_by(.publishedAt) | reverse | .[].tagName' \
                       | grep -E "${pattern}" | tail -n +$((KEEP + 1)) || true)"
             if [ -z "${doomed}" ]; then
               echo "   nothing to remove"
@@ -391,6 +394,7 @@ jobs:
             fi
             printf '%s\n' "${doomed}" | while read -r tag; do
               [ -n "${tag}" ] || continue
+              case " ${JUST_RELEASED} " in *" ${tag} "*) echo "   keeping ${tag} (released by this run)"; continue ;; esac
               echo "   deleting ${tag}"
               gh release delete "${tag}" -R REG-Linux/regmsg-binaries --cleanup-tag --yes \
                 || echo "::warning::could not delete release ${tag}"
